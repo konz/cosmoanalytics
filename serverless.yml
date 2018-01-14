@@ -1,0 +1,79 @@
+service: cosmoanalytics
+provider:
+  name: aws
+  runtime: python3.6
+  # TODO: configure this outside of the project
+  region: eu-central-1
+  environment:
+    QUEUE:
+      Ref: queue
+    CSV_DATA_BUCKET:
+      Ref: csvDataBucket
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "sqs:ReceiveMessage"
+        - "sqs:GetQueueUrl"
+      Resource:
+        "Fn::GetAtt":
+          - queue
+          - Arn
+    - Effect: "Allow"
+      Action:
+        - "s3:PutObject"
+      # Serverless does not support CloudFormation function shortcuts
+      Resource: { "Fn::Join" : ["", ["arn:aws:s3:::", { "Ref" : "csvDataBucket" }, "/*" ] ]  }
+
+functions:
+  # TODO: change name
+  hello:
+    handler: handler.write_csv
+    events:
+      # Run at 10:00 am (UTC) every day
+      - schedule: cron(0 10 * * ? *)
+
+resources:
+  Resources:
+    queue:
+      Type: "AWS::SQS::Queue"
+    iotToSqsAccessRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        AssumeRolePolicyDocument:
+          Statement:
+            -
+              Effect: "Allow"
+              Principal:
+                Service:
+                  - "iot.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"
+        Policies:
+          -
+            PolicyName: sqsSendMessage
+            PolicyDocument:
+              Statement:
+                -
+                  Effect: Allow
+                  Action: "sqs:SendMessage"
+                  Resource:
+                    "Fn::GetAtt":
+                      - queue
+                      - Arn
+    queueIotDataRule:
+      Type: "AWS::IoT::TopicRule"
+      Properties:
+        TopicRulePayload:
+          RuleDisabled: false
+          Sql: "SELECT * FROM 'cosmo/#'"
+          Actions:
+            -
+              Sqs:
+                QueueUrl:
+                  Ref: queue
+                RoleArn:
+                  "Fn::GetAtt":
+                    - iotToSqsAccessRole
+                    - Arn
+    csvDataBucket:
+      Type: "AWS::S3::Bucket"

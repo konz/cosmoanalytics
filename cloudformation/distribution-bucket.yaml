@@ -1,0 +1,10 @@
+Description: "Cosmoanalytics packaged Lambda code"
+Resources:
+  distributionBucket:
+    Type: "AWS::S3::Bucket"
+Outputs:
+  distributionBucket:
+    Description: "Name of the bucket to upload the packaged Lambda code"
+    Value: !Ref distributionBucket
+    Export:
+      Name: !Join [ ":", [ !Ref "AWS::StackName", distributionBucket ] ]

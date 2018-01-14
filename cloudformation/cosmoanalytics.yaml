@@ -1,0 +1,87 @@
+Description: "Creates CSV files from cosmopusher IoT events once a day and stores it in S3"
+Transform: 'AWS::Serverless-2016-10-31'
+Parameters:
+  distributionStackName:
+    Type: String
+    Description: Name of the distribtion stack
+    Default: cosmoanalytics-dist
+  lambdaS3Key:
+    Type: String
+    Description: S3 key of the Lambda code package
+    Default: "latest/cosmoanalytics.zip"
+
+Resources:
+  function:
+    Type: "AWS::Serverless::Function"
+    Properties:
+      CodeUri:
+        Bucket:
+          "Fn::ImportValue": !Join [ ":", [ !Ref distributionStackName, distributionBucket ] ]
+        Key: !Ref lambdaS3Key
+      Environment:
+        Variables:
+          QUEUE:
+            Ref: queue
+          CSV_DATA_BUCKET:
+            Ref: csvDataBucket
+      Handler: handler.handle
+      MemorySize: 512
+      Runtime: python3.6
+      Timeout: 30
+      Events:
+        dailyAt10:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 10 * * ? *)
+      Policies:
+        - SQSPollerPolicy:
+            QueueName:
+              "Fn::GetAtt":
+                - queue
+                - QueueName
+        - S3CrudPolicy:
+            BucketName: !Ref csvDataBucket
+
+  queue:
+    Type: "AWS::SQS::Queue"
+  iotToSqsAccessRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "iot.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: sqsSendMessage
+          PolicyDocument:
+            Statement:
+              -
+                Effect: Allow
+                Action: "sqs:SendMessage"
+                Resource:
+                  "Fn::GetAtt":
+                    - queue
+                    - Arn
+  queueIotDataRule:
+    Type: "AWS::IoT::TopicRule"
+    Properties:
+      TopicRulePayload:
+        RuleDisabled: false
+        Sql: "SELECT * FROM 'cosmo/#'"
+        Actions:
+          -
+            Sqs:
+              QueueUrl:
+                Ref: queue
+              RoleArn:
+                "Fn::GetAtt":
+                  - iotToSqsAccessRole
+                  - Arn
+  csvDataBucket:
+    Type: "AWS::S3::Bucket"
